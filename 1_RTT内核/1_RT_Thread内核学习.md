@@ -95,6 +95,54 @@
       3. 调度器的初始化要在硬件初始化之后，线程创建之前
    3. 启动调度器
       1. `void rt_system_scheduler_start(void)`
-      2. 
+      2. 主要工作:
+         1. 通过宏`rt_list_entry`找到当前优先级最高的线程的线程控制块
+         2. 标记此线程控制块为全局变量`rt_current_thread`
+         3. 切换到该线程`rt_hw_context_switch_to((rt_uint32_t)&to_thread->sp)`
+   4. 第一次线程切换
+      1. `rt_hw_context_switch_to() `
+         1. 把即将要调度的线程通过r0赋值到`rt_interrupt_to_thread`中
+         2. 令`rt_interrupt_from_thread`的值为0，表示启动第一次线程切换
+         3. 令`rt_thread_switch_interrupt_flag`为1，当执行了`PendSVC Handler`时，该flag清零
+         4. 设置PendSV异常的优先级为最低，并触发PendSV异常(产生上下文切换)
+         5. 需要中断打开后才会执行PendSV中断
+      2. `PendSV_Handler()`
+         1. 关中断，保证上下文切换不被中断
+         2. 判断`rt_thread_switch_interrupt_flag`是否为0，是则退出`PendSVC Handler`，否则令该flag清零
+         3. 判断`rt_interrupt_from_thread`是否为0，是则直接跳去下文切换，否则跳去上文保存
+         4. 上文保存:
+            1. `xPSR,PC（线程入口地址）,R14,R12,R3,R2,R1,R0（线程的形参）`会自动保存
+            2. 手动保存r4-r11
+         5. 下文切换:
+            1. 获取`rt_interrupt_to_thread`的值，这是线程栈指针SP的指针，之后获取SP的值
+            2. 把栈里面的内容加载到CPU寄存器r4~r11
+            3. 并把线程栈指针r1更新到psp
+         6. 中断恢复
+            1. 恢复中断
+            2. 新的线程栈中的`xPSR,PC（线程入口地址）,R14,R12,R3,R2,R1,R0（线程的形参）`会自动保存
+   5. 系统调度
+      1. `rt_schedule()`：只是一个简单的if..else..函数，用于判断当前最高优先级的线程控制块，之后就执行下个优先级的线程控制块
+      2. `rt_hw_contex_switch()`:产生上下文切换
+         1. 把`rt_thread_switch_interrupt_flag`加载到r2
+         2. 把r2的值暂存到r3并和1比较，如果相等则启动切换，否则对`rt_thread_switch_interrupt_flag`进行置1
+         3. 把上一个线程栈指针存储到`rt_interrupt_from_thread`
+         4. 把下一个线程栈指针存储到`rt_interrupt_to_thread`
+         5. 启动上下文切换 
+   
+5. main函数结构
+   1. 定义线程栈
+   2. 定义/声明线程函数
+   3. 调度器初始化
+   4. 线程初始化、将线程插入就绪列表
+   5. 启动系统调度器
+
+### 备注：
+1. RTOS的调度是怎么实现的？
+   1. 利用线程就绪列表来对线程进行多种优先级的调度管理；
+   2. 通过线程控制块的tlist元素(指针)，把线程和就绪列表管理起来
+   3. 启动调度器后，调度器会遍历线程就绪列表，按照优先级从高到低的顺序，把表中的线程逐一执行；
+   4. 系统给每个线程分配特定的时间片，当某个线程的时间片消耗完成，则开始执行下个线程
+   5. 如果由中断发生，则先进行上下文切换，之后再执行中断程序
+   6. 如果是启动第一个线程时，则不需要做上文保存，只需要做下文切换，之后的所有线程的切换都需要进行一个完整的上下文切换过程。
 
 
